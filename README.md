@@ -163,12 +163,27 @@ v1/v2). Steps:
    Just swap it for this `cog_…` one.)
 3. **Get your org ID.** It's shown on the **Settings → Service users** page and
    starts with `org-`. Put it in `DEVIN_ORG_ID`.
-4. *(Optional)* **Attribute sessions to a human.** To make each remediation
-   session appear in a teammate's session list, set `DEVIN_CREATE_AS_USER_ID` to
-   their user ID (prefix `user-`). This requires the **`ImpersonateOrgSessions`**
-   permission on the service-user role (the `Admin` role includes it) and the
-   target user to have `UseDevinSessions`. Find user IDs via the List users
-   endpoint or org member settings. Leave empty to attribute to the service user.
+4. *(Optional)* **Attribute sessions to a human.** By default sessions are owned
+   by the service user, so they don't show up in a person's "My sessions" list.
+   To attribute each remediation session to a real human, set
+   `DEVIN_CREATE_AS_USER_ID` to their user ID (prefix `user-`). This is a plain
+   env var — nothing is hard-coded — so **anyone testing the orchestrator just
+   sets their own user ID** and the sessions appear under their account. Leave it
+   empty to attribute to the service user.
+
+   Requirements for attribution to work:
+   - The API key must belong to a service user whose role has the
+     **`ImpersonateOrgSessions`** permission. The built-in **`Admin`** role
+     includes it; custom roles that grant it require an Enterprise/Team plan, so
+     on standard orgs use an Admin-role service user dedicated to this service.
+   - The target user must have `UseDevinSessions`.
+
+   **Finding your `user-` ID:** the org member settings show it, but the simplest
+   way is to read it from a session *you* created — `GET /v3/organizations/{org}/
+   sessions/{id}` returns a `user_id` field (sessions created by a service user
+   show `user_id: bot_apk`). If attribution isn't permitted you'll get
+   `403 {"detail":"Unauthorized"}` on session creation — that means the role is
+   missing `ImpersonateOrgSessions`.
 
 Smoke-test the credentials before running the service:
 
