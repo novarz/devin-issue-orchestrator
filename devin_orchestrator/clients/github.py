@@ -116,6 +116,13 @@ class GitHubClient:
             json={"labels": labels},
         )
 
+    async def add_assignees(self, repo: str, number: int, assignees: list[str]) -> None:
+        await self._request(
+            "POST",
+            f"/repos/{repo}/issues/{number}/assignees",
+            json={"assignees": assignees},
+        )
+
     async def get_pull(self, repo: str, number: int) -> dict[str, Any]:
         data = await self._request("GET", f"/repos/{repo}/pulls/{number}")
         if not isinstance(data, dict):

@@ -346,11 +346,17 @@ class Orchestrator:
             outcome.value,
             label,
         )
+        assignees = self._settings.escalation_assignees
+        mention = (
+            " Assigning " + ", ".join(f"@{name}" for name in assignees) + "."
+            if assignees
+            else ""
+        )
         await self._safe_comment(
             tracked,
             f"Automated remediation failed after {tracked.attempts} attempts "
             f"(last outcome: {outcome.value}). Escalating for human review and "
-            f"applying the `{label}` label.",
+            f"applying the `{label}` label.{mention}",
         )
         try:
             await self._github.add_labels(
@@ -358,6 +364,18 @@ class Orchestrator:
             )
         except GitHubAPIError as exc:
             logger.warning("Failed to apply escalation label: %s", exc)
+        if assignees:
+            try:
+                await self._github.add_assignees(
+                    self._settings.github_repo, tracked.event.number, list(assignees)
+                )
+                logger.info(
+                    "\U0001f464 Assigned issue #%s to %s",
+                    tracked.event.number,
+                    ", ".join(assignees),
+                )
+            except GitHubAPIError as exc:
+                logger.warning("Failed to assign escalation: %s", exc)
 
     # ------------------------------------------------------------------ #
     # Helpers

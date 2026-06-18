@@ -29,7 +29,8 @@ API (v3)** — not Devin's native GitHub integration.
 7. **Retry/escalation:** on failure or stall, the failure is commented, a
    corrective feedback message is sent to the session, and the issue is retried
    up to a **retry cap** (default 2). After the cap, the issue is labeled
-   `needs-human`. No infinite loops.
+   `needs-human` and (optionally) assigned to the GitHub user(s) in
+   `ESCALATION_ASSIGNEE`. No infinite loops.
 8. **Metrics:** success rate, time-to-PR, ACU cost per issue, and retry counts
    are exposed at `GET /metrics` (JSON) and a minimal HTML dashboard at
    `GET /dashboard`.
