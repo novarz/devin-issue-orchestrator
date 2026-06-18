@@ -153,6 +153,13 @@ class DevinClient:
             "POST", f"/sessions/{session_id}/messages", json={"message": message}
         )
 
+    async def terminate_session(
+        self, session_id: str, archive: bool = False
+    ) -> dict[str, Any]:
+        """Terminate (and optionally archive) a session. Cannot be resumed."""
+        suffix = "?archive=true" if archive else ""
+        return await self._request("DELETE", f"/sessions/{session_id}{suffix}")
+
 
 def extract_pr_url(session: dict[str, Any]) -> Optional[str]:
     """Return a PR URL from a session payload, if any.
@@ -180,12 +187,34 @@ def extract_summary(session: dict[str, Any]) -> Optional[str]:
 
 
 def is_terminal(session: dict[str, Any]) -> bool:
-    """A session is terminal when it stops working or reports completion."""
+    """A session is terminal when it stops working or reports completion.
+
+    Beyond the obvious terminal statuses, an autonomous orchestrator has no
+    human inside the session to answer prompts, so a session that has reported
+    a *completed* result or is idling on the user with a PR already open is
+    treated as done (it would otherwise hang until the session timeout).
+
+    Note: ``structured_output`` can be submitted mid-task with an interim,
+    not-yet-final payload (e.g. ``pr_url=null, acceptance_criteria_met=false``
+    while pre-commit runs), so its mere presence is NOT a completion signal —
+    only a PR or a met-criteria flag counts.
+    """
     status = str(session.get("status", "")).lower()
     detail = str(session.get("status_detail") or "").lower()
     if status in TERMINAL_STATUSES:
         return True
-    return detail == "finished"
+    if detail == "finished":
+        return True
+    structured = session.get("structured_output")
+    if isinstance(structured, dict) and (
+        structured.get("pr_url") or structured.get("acceptance_criteria_met")
+    ):
+        return True
+    # No human will ever respond in this pipeline; if Devin finished its work
+    # (a PR is open) and is now waiting on the user, consider it done.
+    if detail == "waiting_for_user" and extract_pr_url(session) is not None:
+        return True
+    return False
 
 
 def is_error(session: dict[str, Any]) -> bool:

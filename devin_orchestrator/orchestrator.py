@@ -88,6 +88,7 @@ class Orchestrator:
                 tracked, "Orchestrator hit an unexpected error processing this issue."
             )
         finally:
+            await self._safe_terminate(tracked)
             self._metrics.record_issue_completed(tracked.acus_consumed, tracked.retries)
         return tracked
 
@@ -377,6 +378,26 @@ class Orchestrator:
             structured_output=structured if isinstance(structured, dict) else None,
             timed_out=timed_out,
         )
+
+    async def _safe_terminate(self, tracked: TrackedIssue) -> None:
+        """Terminate the session so an idle (e.g. waiting_for_user) one is freed."""
+        session_id = tracked.session_id
+        if not session_id:
+            return
+        try:
+            await self._devin.terminate_session(session_id)
+            logger.info(
+                "\U0001f9f9 Terminated session %s for issue #%s",
+                session_id,
+                tracked.event.number,
+            )
+        except DevinAPIError as exc:
+            logger.warning(
+                "Failed to terminate session %s for issue #%s: %s",
+                session_id,
+                tracked.event.number,
+                exc,
+            )
 
     async def _safe_comment(self, tracked: TrackedIssue, body: str) -> None:
         marked = f"{self._settings.bot_comment_marker}\n{body}"

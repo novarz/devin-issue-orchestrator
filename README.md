@@ -198,6 +198,19 @@ Verification reads `pr_url` from this as a fallback (in addition to the native
 `pull_requests` array), the `summary` is posted to the GitHub issue, and any
 `unresolved` note is logged. Set `DEVIN_STRUCTURED_OUTPUT=false` to disable.
 
+### Session completion in an autonomous pipeline
+
+There is no human inside a session to answer prompts, so a session that finishes
+its work often lands in `running` / `status_detail=waiting_for_user` rather than a
+hard `exit`. The orchestrator treats a session as **done** when it reports a
+*completed* `structured_output` (a `pr_url` or `acceptance_criteria_met=true`) or
+is `waiting_for_user` with a PR already open, then **terminates** the session so it
+doesn't idle until the timeout. Note that `structured_output` may be submitted
+mid-task with an interim payload (e.g. `pr_url=null, acceptance_criteria_met=false`
+while pre-commit runs), so its mere presence is not treated as completion. The only
+"input" a session ever receives is the orchestrator's own corrective feedback on
+the retry path — humans interact via the GitHub issue/PR, not the session.
+
 ## Logging
 
 Logs narrate the full lifecycle of every issue, one line per transition:
