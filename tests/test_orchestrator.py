@@ -46,6 +46,7 @@ class FakeDevin:
         self._sessions = sessions
         self._idx = 0
         self.created: list[str] = []
+        self.create_kwargs: list[dict[str, Any]] = []
         self.messages: list[str] = []
 
     async def create_session(
@@ -55,8 +56,18 @@ class FakeDevin:
         repos: Optional[list[str]] = None,
         tags: Optional[list[str]] = None,
         title: Optional[str] = None,
+        create_as_user_id: Optional[str] = None,
+        structured_output_schema: Optional[dict[str, Any]] = None,
+        structured_output_required: Optional[bool] = None,
     ) -> dict[str, Any]:
         self.created.append(prompt)
+        self.create_kwargs.append(
+            {
+                "create_as_user_id": create_as_user_id,
+                "structured_output_schema": structured_output_schema,
+                "structured_output_required": structured_output_required,
+            }
+        )
         return {
             "session_id": "devin-1",
             "url": "https://app.devin.ai/sessions/devin-1",
@@ -232,3 +243,82 @@ async def test_duplicate_event_is_not_reprocessed() -> None:
     await orch.handle_event(event)
 
     assert len(devin.created) == 1  # second call short-circuits
+
+
+@pytest.mark.asyncio
+async def test_structured_output_is_requested_by_default() -> None:
+    devin = FakeDevin(
+        [
+            {
+                "session_id": "devin-1",
+                "status": "exit",
+                "status_detail": "finished",
+                "pull_requests": [{"pr_url": PR_URL}],
+                "acus_consumed": 1.0,
+            }
+        ]
+    )
+    orch, _, _ = build(devin, FakeGitHub(), make_settings())
+
+    await orch.handle_event(make_event())
+
+    kwargs = devin.create_kwargs[0]
+    assert kwargs["structured_output_required"] is True
+    assert kwargs["structured_output_schema"] is not None
+    assert "summary" in kwargs["structured_output_schema"]["properties"]
+    assert kwargs["create_as_user_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_structured_output_can_be_disabled_and_user_attributed() -> None:
+    devin = FakeDevin(
+        [
+            {
+                "session_id": "devin-1",
+                "status": "exit",
+                "status_detail": "finished",
+                "pull_requests": [{"pr_url": PR_URL}],
+                "acus_consumed": 1.0,
+            }
+        ]
+    )
+    settings = make_settings(
+        devin_structured_output=False, devin_create_as_user_id="user-42"
+    )
+    orch, _, _ = build(devin, FakeGitHub(), settings)
+
+    await orch.handle_event(make_event())
+
+    kwargs = devin.create_kwargs[0]
+    assert kwargs["structured_output_schema"] is None
+    assert kwargs["structured_output_required"] is None
+    assert kwargs["create_as_user_id"] == "user-42"
+
+
+@pytest.mark.asyncio
+async def test_summary_from_structured_output_is_posted_and_pr_falls_back() -> None:
+    # No native pull_requests array; PR URL only present in structured_output.
+    devin = FakeDevin(
+        [
+            {
+                "session_id": "devin-1",
+                "status": "exit",
+                "status_detail": "finished",
+                "pull_requests": [],
+                "structured_output": {
+                    "acceptance_criteria_met": True,
+                    "pr_url": PR_URL,
+                    "summary": "Patched the broken thing.",
+                },
+                "acus_consumed": 2.0,
+            }
+        ]
+    )
+    github = FakeGitHub()
+    orch, _, _ = build(devin, github, make_settings())
+
+    tracked = await orch.handle_event(make_event())
+
+    assert tracked.pr_url == PR_URL  # recovered from structured_output
+    joined = "\n".join(github.comments)
+    assert "Patched the broken thing." in joined

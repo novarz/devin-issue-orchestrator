@@ -22,6 +22,32 @@ logger = logging.getLogger(__name__)
 TERMINAL_STATUSES = frozenset({"exit", "error", "suspended"})
 ERROR_STATUSES = frozenset({"error"})
 
+# JSON Schema (Draft 7) asking Devin to return a typed remediation result.
+# Self-contained (no external $ref), well under the 64KB v3 limit.
+REMEDIATION_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["acceptance_criteria_met", "summary"],
+    "properties": {
+        "acceptance_criteria_met": {
+            "type": "boolean",
+            "description": "True only if every acceptance criterion is satisfied.",
+        },
+        "pr_url": {
+            "type": ["string", "null"],
+            "description": "URL of the pull request opened for this issue, if any.",
+        },
+        "summary": {
+            "type": "string",
+            "description": "One-paragraph summary of what was changed and why.",
+        },
+        "unresolved": {
+            "type": ["string", "null"],
+            "description": "Anything left unresolved or requiring human attention.",
+        },
+    },
+}
+
 
 class DevinAPIError(RuntimeError):
     """Raised when a Devin API call fails."""
@@ -91,6 +117,9 @@ class DevinClient:
         repos: Optional[list[str]] = None,
         tags: Optional[list[str]] = None,
         title: Optional[str] = None,
+        create_as_user_id: Optional[str] = None,
+        structured_output_schema: Optional[dict[str, Any]] = None,
+        structured_output_required: Optional[bool] = None,
     ) -> dict[str, Any]:
         """Create a session with a mandatory ACU cap."""
         if max_acu_limit <= 0:
@@ -102,7 +131,18 @@ class DevinClient:
             body["tags"] = tags
         if title:
             body["title"] = title
-        logger.info("Creating Devin session (acu_cap=%s)", max_acu_limit)
+        if create_as_user_id:
+            body["create_as_user_id"] = create_as_user_id
+        if structured_output_schema is not None:
+            body["structured_output_schema"] = structured_output_schema
+        if structured_output_required is not None:
+            body["structured_output_required"] = structured_output_required
+        logger.info(
+            "Creating Devin session (acu_cap=%s%s%s)",
+            max_acu_limit,
+            ", structured_output" if structured_output_schema is not None else "",
+            f", as_user={create_as_user_id}" if create_as_user_id else "",
+        )
         return await self._request("POST", "/sessions", json=body)
 
     async def get_session(self, session_id: str) -> dict[str, Any]:
@@ -115,12 +155,27 @@ class DevinClient:
 
 
 def extract_pr_url(session: dict[str, Any]) -> Optional[str]:
-    """Return the first PR URL from a session payload, if any."""
+    """Return a PR URL from a session payload, if any.
+
+    Prefers the native ``pull_requests`` array; falls back to a ``pr_url``
+    reported in the session's validated ``structured_output``.
+    """
     prs = session.get("pull_requests")
     if isinstance(prs, list):
         for pr in prs:
             if isinstance(pr, dict) and pr.get("pr_url"):
                 return str(pr["pr_url"])
+    structured = session.get("structured_output")
+    if isinstance(structured, dict) and structured.get("pr_url"):
+        return str(structured["pr_url"])
+    return None
+
+
+def extract_summary(session: dict[str, Any]) -> Optional[str]:
+    """Return the human-readable summary from structured output, if present."""
+    structured = session.get("structured_output")
+    if isinstance(structured, dict) and structured.get("summary"):
+        return str(structured["summary"])
     return None
 
 
