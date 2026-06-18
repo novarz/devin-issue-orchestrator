@@ -60,6 +60,11 @@ class Settings:
     devin_api_key: str = ""
     devin_org_id: str = ""
     devin_base_url: str = "https://api.devin.ai/v3"
+    # Attribute sessions to a human user (prefix "user-"). Empty = service user.
+    # Requires ImpersonateOrgSessions on the service-user role.
+    devin_create_as_user_id: str = ""
+    # Ask Devin to return a typed remediation result (pr_url/summary/...).
+    devin_structured_output: bool = True
 
     # Orchestration behaviour
     poll_interval_seconds: float = 60.0
@@ -99,6 +104,10 @@ class Settings:
             devin_base_url=os.environ.get(
                 "DEVIN_BASE_URL", "https://api.devin.ai/v3"
             ).rstrip("/"),
+            devin_create_as_user_id=os.environ.get(
+                "DEVIN_CREATE_AS_USER_ID", ""
+            ).strip(),
+            devin_structured_output=_get_bool("DEVIN_STRUCTURED_OUTPUT", True),
             poll_interval_seconds=_get_float("POLL_INTERVAL_SECONDS", 60.0),
             session_poll_interval_seconds=_get_float(
                 "SESSION_POLL_INTERVAL_SECONDS", 30.0

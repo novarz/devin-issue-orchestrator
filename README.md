@@ -144,6 +144,60 @@ Secrets are never committed or logged. The `GITHUB_TOKEN` needs issue write
 (comments + labels) and pull-request/commit-status read on the fork. The
 `DEVIN_API_KEY` is a service-user token (`cog_...`) for the v3 API.
 
+## Devin authentication setup
+
+The orchestrator calls the **v3 organization API** with a **service-user** token
+(not a legacy `apk_…` personal/service key — those are deprecated and tied to
+v1/v2). Steps:
+
+1. **Create a service user.** In Devin, go to **Settings → Service users → Create
+   service user**. Give it a name (e.g. `issue-orchestrator`) and a role
+   (`Member` is enough for creating sessions).
+2. **Generate its API key.** From the service user, create an API key — it starts
+   with `cog_`. Put it in `DEVIN_API_KEY`. (Migrating off a legacy `apk_…` key?
+   Just swap it for this `cog_…` one.)
+3. **Get your org ID.** It's shown on the **Settings → Service users** page and
+   starts with `org-`. Put it in `DEVIN_ORG_ID`.
+4. *(Optional)* **Attribute sessions to a human.** To make each remediation
+   session appear in a teammate's session list, set `DEVIN_CREATE_AS_USER_ID` to
+   their user ID (prefix `user-`). This requires the **`ImpersonateOrgSessions`**
+   permission on the service-user role (the `Admin` role includes it) and the
+   target user to have `UseDevinSessions`. Find user IDs via the List users
+   endpoint or org member settings. Leave empty to attribute to the service user.
+
+Smoke-test the credentials before running the service:
+
+```bash
+export DEVIN_ORG_ID=org-xxx
+curl -X POST "https://api.devin.ai/v3/organizations/$DEVIN_ORG_ID/sessions" \
+  -H "Authorization: Bearer $DEVIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Say hello", "max_acu_limit": 1}'
+```
+
+A `200` with a `session_id` means auth is good. See the
+[migration guide](https://docs.devin.ai/api-reference/getting-started/migration-guide)
+and [session attribution](https://docs.devin.ai/api-reference/overview#session-attribution)
+docs.
+
+> **Heads up:** Devin has announced Personal Access Tokens (PATs) are "coming
+> soon" — once available, you'll be able to authenticate directly as a user
+> without a service user or `create_as_user_id`.
+
+### Structured output
+
+By default (`DEVIN_STRUCTURED_OUTPUT=true`) the orchestrator passes a
+`structured_output_schema` and sets `structured_output_required=true`, asking each
+session to return a typed result:
+
+```json
+{ "acceptance_criteria_met": true, "pr_url": "https://…", "summary": "…", "unresolved": null }
+```
+
+Verification reads `pr_url` from this as a fallback (in addition to the native
+`pull_requests` array), the `summary` is posted to the GitHub issue, and any
+`unresolved` note is logged. Set `DEVIN_STRUCTURED_OUTPUT=false` to disable.
+
 ## Logging
 
 Logs narrate the full lifecycle of every issue, one line per transition:

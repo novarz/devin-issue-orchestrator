@@ -12,9 +12,11 @@ import logging
 import time
 
 from .clients.devin import (
+    REMEDIATION_OUTPUT_SCHEMA,
     DevinAPIError,
     DevinClient,
     extract_pr_url,
+    extract_summary,
     is_error,
     is_terminal,
 )
@@ -156,13 +158,23 @@ class Orchestrator:
         prompt = build_prompt(
             event, self._settings.github_repo, self._settings.expected_base_branch
         )
+        settings = self._settings
         try:
             session = await self._devin.create_session(
                 prompt=prompt,
-                max_acu_limit=self._settings.max_acu_limit,
-                repos=[self._settings.github_repo],
+                max_acu_limit=settings.max_acu_limit,
+                repos=[settings.github_repo],
                 tags=["devin-orchestrator", f"issue-{event.number}"],
                 title=f"Fix issue #{event.number}: {event.title}"[:120],
+                create_as_user_id=settings.devin_create_as_user_id or None,
+                structured_output_schema=(
+                    REMEDIATION_OUTPUT_SCHEMA
+                    if settings.devin_structured_output
+                    else None
+                ),
+                structured_output_required=(
+                    True if settings.devin_structured_output else None
+                ),
             )
         except (DevinAPIError, ValueError) as exc:
             logger.error("Failed to create session for %s: %s", event.id, exc)
@@ -261,13 +273,19 @@ class Orchestrator:
         tracked.pr_opened_at = time.time()
         tracked.state = IssueState.PR_OPENED
         self._metrics.record_pr_opened(tracked.time_to_pr_seconds)
+        summary = extract_summary(session)
         logger.info(
-            "\U0001f500 PR OPENED for issue #%s | %s | time-to-PR=%.0fs",
+            "\U0001f500 PR OPENED for issue #%s | %s | time-to-PR=%.0fs%s",
             tracked.event.number,
             pr_url,
             tracked.time_to_pr_seconds or 0.0,
+            f" | {summary}" if summary else "",
         )
-        await self._safe_comment(tracked, f"Devin opened a pull request: {pr_url}")
+        await self._safe_comment(
+            tracked,
+            f"Devin opened a pull request: {pr_url}"
+            + (f"\n\n**Summary:** {summary}" if summary else ""),
+        )
 
     async def _evaluate(self, tracked: TrackedIssue, result: SessionResult) -> Outcome:
         if result.pr_url:
@@ -299,6 +317,12 @@ class Orchestrator:
             if verification.passed:
                 return Outcome.SUCCESS
             tracked.state = IssueState.VERIFIED_FAILED
+            if result.structured_output and result.structured_output.get("unresolved"):
+                logger.info(
+                    "\U0001f4dd Devin reported unresolved work on issue #%s: %s",
+                    tracked.event.number,
+                    result.structured_output["unresolved"],
+                )
             return Outcome.PR_VERIFICATION_FAILED
 
         # No PR produced.
