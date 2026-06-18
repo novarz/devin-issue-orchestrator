@@ -19,13 +19,40 @@ def test_terminal_on_finished_detail() -> None:
     assert is_terminal({"status": "running", "status_detail": "finished"}) is True
 
 
-def test_terminal_on_structured_output_present() -> None:
+def test_terminal_on_final_structured_output() -> None:
+    # A completed result (criteria met or a PR) marks the session done.
     session = {
         "status": "running",
         "status_detail": "working",
         "structured_output": {"summary": "done", "acceptance_criteria_met": True},
     }
     assert is_terminal(session) is True
+    assert (
+        is_terminal(
+            {
+                "status": "running",
+                "structured_output": {
+                    "pr_url": PR_URL,
+                    "acceptance_criteria_met": False,
+                },
+            }
+        )
+        is True
+    )
+
+
+def test_not_terminal_on_interim_structured_output() -> None:
+    # Devin can submit interim output mid-task (no PR, criteria not yet met).
+    session = {
+        "status": "running",
+        "status_detail": "working",
+        "structured_output": {
+            "summary": "Running pre-commit checks before committing.",
+            "pr_url": None,
+            "acceptance_criteria_met": False,
+        },
+    }
+    assert is_terminal(session) is False
 
 
 def test_terminal_on_waiting_for_user_with_pr() -> None:

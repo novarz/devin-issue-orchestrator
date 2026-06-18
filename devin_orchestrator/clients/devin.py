@@ -190,9 +190,14 @@ def is_terminal(session: dict[str, Any]) -> bool:
     """A session is terminal when it stops working or reports completion.
 
     Beyond the obvious terminal statuses, an autonomous orchestrator has no
-    human inside the session to answer prompts, so a session that has either
-    produced its final ``structured_output`` or is idling on the user with a
-    PR already open is treated as done (it would otherwise hang until timeout).
+    human inside the session to answer prompts, so a session that has reported
+    a *completed* result or is idling on the user with a PR already open is
+    treated as done (it would otherwise hang until the session timeout).
+
+    Note: ``structured_output`` can be submitted mid-task with an interim,
+    not-yet-final payload (e.g. ``pr_url=null, acceptance_criteria_met=false``
+    while pre-commit runs), so its mere presence is NOT a completion signal —
+    only a PR or a met-criteria flag counts.
     """
     status = str(session.get("status", "")).lower()
     detail = str(session.get("status_detail") or "").lower()
@@ -200,9 +205,10 @@ def is_terminal(session: dict[str, Any]) -> bool:
         return True
     if detail == "finished":
         return True
-    # ``structured_output`` is only populated once the agent submits its final
-    # output, so its presence means the task is complete.
-    if session.get("structured_output"):
+    structured = session.get("structured_output")
+    if isinstance(structured, dict) and (
+        structured.get("pr_url") or structured.get("acceptance_criteria_met")
+    ):
         return True
     # No human will ever respond in this pipeline; if Devin finished its work
     # (a PR is open) and is now waiting on the user, consider it done.
