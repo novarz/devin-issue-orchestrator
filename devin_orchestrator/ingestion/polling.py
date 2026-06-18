@@ -102,7 +102,9 @@ class PollingIngestionAdapter(IngestionAdapter):
 
             self._seen.mark_seen(event.id)
             events.append(event)
-            logger.info("New issue detected: %s", event.id)
+            logger.info(
+                "\U0001f195 New issue detected: #%s %r", event.number, event.title
+            )
         return events
 
     def _advance_since(self, updated_at: Optional[Any]) -> None:

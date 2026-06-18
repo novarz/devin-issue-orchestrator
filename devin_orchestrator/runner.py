@@ -46,7 +46,11 @@ class PollerLoop:
 
     async def _run(self) -> None:
         await self._adapter.start()
-        logger.info("Poller started (interval=%ss)", self._interval)
+        logger.info(
+            "\U0001f6f0\ufe0f  Poller started via %r adapter (interval=%ss)",
+            self._adapter.name,
+            self._interval,
+        )
         while not self._stopping.is_set():
             await self._poll_once()
             try:
@@ -60,6 +64,13 @@ class PollerLoop:
         except Exception:  # noqa: BLE001 - a bad poll must not kill the loop
             logger.exception("Ingestion poll failed")
             return
+        if events:
+            logger.info(
+                "\U0001f50d Poll cycle: %s new issue(s) \u2192 dispatching",
+                len(events),
+            )
+        else:
+            logger.debug("Poll cycle: no new issues")
         for event in events:
             task = asyncio.create_task(self._orchestrator.handle_event(event))
             self._inflight.add(task)
