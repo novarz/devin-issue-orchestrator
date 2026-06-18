@@ -17,6 +17,8 @@ import logging
 import os
 import sys
 
+from .log_stream import LOG_BROKER, BrokerHandler
+
 RESET = "\033[0m"
 
 _LEVEL_COLORS = {
@@ -93,9 +95,15 @@ def configure_logging() -> None:
     else:
         handler.setFormatter(DemoFormatter(color=_should_color(fmt)))
 
+    # Mirror every record (sans ANSI colour) into the in-memory broker that
+    # backs the GET /logs/stream SSE endpoint.
+    broker_handler = BrokerHandler(LOG_BROKER)
+    broker_handler.setFormatter(DemoFormatter(color=False))
+
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
+    root.addHandler(broker_handler)
     root.setLevel(level)
 
 

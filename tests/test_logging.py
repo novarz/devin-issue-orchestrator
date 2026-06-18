@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import logging
 
+from devin_orchestrator.log_stream import BrokerHandler
 from devin_orchestrator.logging_setup import DemoFormatter, banner, configure_logging
+
+
+def _stream_handlers(root: logging.Logger) -> list[logging.Handler]:
+    return [h for h in root.handlers if not isinstance(h, BrokerHandler)]
 
 
 def _record(level: int = logging.INFO, msg: str = "hello") -> logging.LogRecord:
@@ -39,9 +44,12 @@ def test_configure_logging_respects_env(monkeypatch) -> None:
     configure_logging()
     root = logging.getLogger()
     assert root.level == logging.DEBUG
-    assert len(root.handlers) == 1
-    # plain mode must never emit a DemoFormatter
-    assert not isinstance(root.handlers[0].formatter, DemoFormatter)
+    stream = _stream_handlers(root)
+    assert len(stream) == 1
+    # plain mode must never emit a DemoFormatter on the stream handler
+    assert not isinstance(stream[0].formatter, DemoFormatter)
+    # the broker handler is always attached for the /logs/stream endpoint
+    assert any(isinstance(h, BrokerHandler) for h in root.handlers)
 
 
 def test_no_color_env_disables_color(monkeypatch) -> None:
@@ -49,7 +57,7 @@ def test_no_color_env_disables_color(monkeypatch) -> None:
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.delenv("LOG_COLOR", raising=False)
     configure_logging()
-    formatter = logging.getLogger().handlers[0].formatter
+    formatter = _stream_handlers(logging.getLogger())[0].formatter
     assert isinstance(formatter, DemoFormatter)
     assert "\033[" not in formatter.format(_record())
 

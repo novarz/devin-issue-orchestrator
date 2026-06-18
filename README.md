@@ -52,7 +52,7 @@ flowchart TD
         VER[Verifier]
         MET[Metrics]
         STORE[(Issue store / dedupe)]
-        API[/metrics, /dashboard, /issues, /healthz/]
+        API[/metrics, /dashboard, /issues, /logs, /healthz/]
     end
 
     DEVIN[Devin REST API v3]
@@ -90,6 +90,8 @@ stateDiagram-v2
 ```
 devin_orchestrator/
   app.py              FastAPI app + endpoints, lifespan wiring
+  log_stream.py       in-memory log broker + SSE streaming
+  logs_view.py        HTML viewer for GET /logs
   config.py           env-only settings (no secrets in code)
   models.py           IssueEvent, TrackedIssue, enums
   ingestion/
@@ -125,6 +127,8 @@ env vars are required.
 - Metrics (JSON): `GET http://localhost:8000/metrics`
 - Dashboard (HTML): `GET http://localhost:8000/dashboard`
 - Tracked issues: `GET http://localhost:8000/issues`
+- Live logs (HTML viewer): `GET http://localhost:8000/logs`
+- Live logs (SSE stream): `GET http://localhost:8000/logs/stream`
 
 ### Local (without Docker)
 
@@ -230,6 +234,24 @@ Controlled via env vars:
 - `LOG_LEVEL` — `DEBUG` | `INFO` | `WARNING` | `ERROR` (default `INFO`).
 - `LOG_FORMAT` — `demo` (colourful, icons; default) or `plain` (for log shippers).
 - `LOG_COLOR` — `1`/`0` to force colour (default: auto-detect TTY; `NO_COLOR` honoured).
+- `LOG_BUFFER_SIZE` — number of recent log lines kept in memory for the live
+  viewer (default `500`).
+
+### Live log streaming (for demos)
+
+The same lifecycle logs are streamed over the network so you can watch them in a
+browser instead of tailing a terminal:
+
+- `GET /logs` — a self-contained HTML viewer (dark "terminal", auto-scroll with a
+  pause toggle, colourised by level) that subscribes to the stream below.
+- `GET /logs/stream` — a [Server-Sent Events](https://developer.mozilla.org/docs/Web/API/Server-sent_events)
+  endpoint. On connect it replays the last `LOG_BUFFER_SIZE` lines, then pushes
+  each new line live (with periodic keep-alive comments). Consume it from the
+  browser viewer, `curl -N http://localhost:8000/logs/stream`, or any SSE client.
+
+Lines are buffered in memory and fanned out to every connected client by an
+in-process broker (`log_stream.py`), so this works without any external log
+infrastructure. ANSI colour is stripped from the streamed copy.
 
 ## Tests
 
