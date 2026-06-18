@@ -74,6 +74,8 @@ class Settings:
     max_retries: int = 2
     expected_base_branch: str = "master"
     needs_human_label: str = "needs-human"
+    # GitHub usernames to assign when an issue is escalated (comma-separated).
+    escalation_assignees: tuple[str, ...] = field(default=())
     issue_label_filter: str = ""  # only process issues carrying this label
     bot_comment_marker: str = "<!-- devin-orchestrator -->"
 
@@ -117,6 +119,11 @@ class Settings:
             max_retries=_get_int("MAX_RETRIES", 2),
             expected_base_branch=os.environ.get("EXPECTED_BASE_BRANCH", "master"),
             needs_human_label=os.environ.get("NEEDS_HUMAN_LABEL", "needs-human"),
+            escalation_assignees=tuple(
+                name.strip()
+                for name in os.environ.get("ESCALATION_ASSIGNEE", "").split(",")
+                if name.strip()
+            ),
             issue_label_filter=os.environ.get("ISSUE_LABEL_FILTER", "").strip(),
             verify_await_ci=_get_bool("VERIFY_AWAIT_CI", True),
             ci_timeout_seconds=_get_float("CI_TIMEOUT_SECONDS", 1800.0),

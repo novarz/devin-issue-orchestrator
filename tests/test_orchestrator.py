@@ -95,6 +95,7 @@ class FakeGitHub:
     def __init__(self, pull: Optional[dict[str, Any]] = None) -> None:
         self.comments: list[str] = []
         self.labels: list[str] = []
+        self.assignees: list[str] = []
         self._pull = pull or {
             "base": {"repo": {"full_name": REPO}, "ref": "master"},
             "head": {"sha": "abc"},
@@ -105,6 +106,9 @@ class FakeGitHub:
 
     async def add_labels(self, repo: str, number: int, labels: list[str]) -> None:
         self.labels.extend(labels)
+
+    async def add_assignees(self, repo: str, number: int, assignees: list[str]) -> None:
+        self.assignees.extend(assignees)
 
     async def get_pull(self, repo: str, number: int) -> dict[str, Any]:
         return self._pull
@@ -218,7 +222,11 @@ async def test_simulated_failure_retries_then_escalates() -> None:
     }
     devin = FakeDevin([no_pr])
     github = FakeGitHub()
-    orch, metrics, _ = build(devin, github, make_settings(max_retries=1))
+    orch, metrics, _ = build(
+        devin,
+        github,
+        make_settings(max_retries=1, escalation_assignees=("octocat", "hubot")),
+    )
 
     tracked = await orch.handle_event(make_event())
 
@@ -229,10 +237,33 @@ async def test_simulated_failure_retries_then_escalates() -> None:
     assert metrics.retries_total == 1
     # Exactly one corrective feedback message was delivered before the retry.
     assert len(devin.messages) == 1
-    # The needs-human label was applied on escalation.
+    # The needs-human label was applied and the issue was assigned on escalation.
     assert "needs-human" in github.labels
+    assert github.assignees == ["octocat", "hubot"]
     joined = "\n".join(github.comments)
     assert "Escalating for human review" in joined
+    assert "@octocat" in joined
+
+
+@pytest.mark.asyncio
+async def test_escalation_without_assignees_does_not_assign() -> None:
+    no_pr = {
+        "session_id": "devin-1",
+        "status": "exit",
+        "status_detail": "blocked",
+        "pull_requests": [],
+        "acus_consumed": 1.0,
+    }
+    devin = FakeDevin([no_pr])
+    github = FakeGitHub()
+    orch, _, _ = build(devin, github, make_settings(max_retries=0))
+
+    tracked = await orch.handle_event(make_event())
+
+    assert tracked.state is IssueState.ESCALATED
+    assert github.assignees == []
+    joined = "\n".join(github.comments)
+    assert "Assigning" not in joined
 
 
 @pytest.mark.asyncio
