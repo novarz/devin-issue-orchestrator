@@ -144,6 +144,25 @@ Secrets are never committed or logged. The `GITHUB_TOKEN` needs issue write
 (comments + labels) and pull-request/commit-status read on the fork. The
 `DEVIN_API_KEY` is a service-user token (`cog_...`) for the v3 API.
 
+## Logging
+
+Logs narrate the full lifecycle of every issue, one line per transition:
+
+```
+12:00:01 i INFO    orch.app               🛰️  Poller started via 'polling' adapter (interval=60s)
+12:00:01 i INFO    orch.orchestrator      📥 INGESTED issue #42 — 'Fix flaky chart'
+12:00:02 i INFO    orch.orchestrator      🚀 SESSION started for issue #42 | id=devin-… | acu_cap=10
+12:01:10 i INFO    orch.orchestrator      🔀 PR OPENED for issue #42 | https://… | time-to-PR=68s
+12:01:12 i INFO    orch.orchestrator      ✅ VERIFICATION passed for issue #42 — PR targets master | CI=success
+12:01:12 i INFO    orch.orchestrator      🎉 DONE issue #42 remediated in 1 attempt(s) | 3.0 ACU | time-to-PR=68s
+```
+
+Controlled via env vars:
+
+- `LOG_LEVEL` — `DEBUG` | `INFO` | `WARNING` | `ERROR` (default `INFO`).
+- `LOG_FORMAT` — `demo` (colourful, icons; default) or `plain` (for log shippers).
+- `LOG_COLOR` — `1`/`0` to force colour (default: auto-detect TTY; `NO_COLOR` honoured).
+
 ## Tests
 
 ```bash

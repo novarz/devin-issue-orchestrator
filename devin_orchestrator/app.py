@@ -21,13 +21,14 @@ from .clients.github import GitHubClient
 from .config import Settings
 from .dashboard import render_dashboard
 from .ingestion.polling import PollingIngestionAdapter
+from .logging_setup import banner, configure_logging
 from .metrics import Metrics
 from .orchestrator import Orchestrator
 from .runner import PollerLoop
 from .store import IssueStore
 from .verification import Verifier
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +46,8 @@ class AppState:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = Settings.from_env()
+    for line in banner(settings.github_repo, settings.dry_run).splitlines():
+        logger.info(line)
     metrics = Metrics()
     store = IssueStore()
 
@@ -70,7 +73,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.app_state = state
 
     if settings.dry_run:
-        logger.warning("DRY_RUN enabled: background poller is NOT started.")
+        logger.warning(
+            "DRY_RUN enabled: background poller is NOT started "
+            "(no GitHub polling, no Devin sessions)."
+        )
     else:
         settings.validate_for_live()
         verifier = Verifier(
@@ -99,7 +105,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         poller = PollerLoop(adapter, orchestrator, settings.poll_interval_seconds)
         poller.start()
         state.poller = poller
-        logger.info("Orchestrator started for repo %s", settings.github_repo)
+        logger.info(
+            "Orchestrator online | repo=%s | poll=%ss | acu_cap=%s | max_retries=%s",
+            settings.github_repo,
+            settings.poll_interval_seconds,
+            settings.max_acu_limit,
+            settings.max_retries,
+        )
 
     try:
         yield

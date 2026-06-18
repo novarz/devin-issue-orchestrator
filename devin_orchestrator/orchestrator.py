@@ -63,12 +63,19 @@ class Orchestrator:
         """Process a single new-issue event end to end."""
         existing = self._store.get(event.id)
         if existing is not None:
-            logger.info("Issue %s already tracked; skipping", event.id)
+            logger.info(
+                "\u23ed\ufe0f  Issue #%s already tracked; skipping", event.number
+            )
             return existing
 
         tracked = self._store.track(event)
         self._metrics.record_issue()
-        logger.info("Processing issue %s", event.id)
+        logger.info(
+            "\U0001f4e5 INGESTED issue #%s \u2014 %r%s",
+            event.number,
+            event.title,
+            f" [{', '.join(event.labels)}]" if event.labels else "",
+        )
         try:
             await self._process_issue(tracked)
         except Exception:  # noqa: BLE001 - never let one issue kill the loop
@@ -102,9 +109,10 @@ class Orchestrator:
             outcome = await self._evaluate(tracked, result)
             action = decide_next_action(outcome, attempt, settings.max_retries)
             logger.info(
-                "Issue %s attempt %s -> outcome=%s action=%s",
-                tracked.event.id,
+                "\U0001f9ed Issue #%s attempt %s/%s \u2014 outcome=%s \u2192 action=%s",
+                tracked.event.number,
                 attempt,
+                settings.max_attempts,
                 outcome.value,
                 action.value,
             )
@@ -112,6 +120,14 @@ class Orchestrator:
             if action is Action.COMPLETE:
                 tracked.state = IssueState.VERIFIED_PASSED
                 tracked.completed_at = time.time()
+                logger.info(
+                    "\U0001f389 DONE issue #%s remediated in %s attempt(s) "
+                    "| %.1f ACU | time-to-PR=%.0fs",
+                    tracked.event.number,
+                    attempt,
+                    tracked.acus_consumed,
+                    tracked.time_to_pr_seconds or 0.0,
+                )
                 return
             if action is Action.ESCALATE:
                 await self._escalate(tracked, outcome)
@@ -119,6 +135,13 @@ class Orchestrator:
             # RETRY
             tracked.retries += 1
             self._metrics.record_retry()
+            logger.warning(
+                "\U0001f501 RETRY issue #%s (retry %s/%s) \u2014 %s",
+                tracked.event.number,
+                tracked.retries,
+                settings.max_retries,
+                outcome.value,
+            )
             await self._safe_comment(
                 tracked,
                 f"Attempt {attempt} did not pass verification "
@@ -153,6 +176,13 @@ class Orchestrator:
         tracked.session_started_at = time.time()
         tracked.state = IssueState.SESSION_STARTED
         self._metrics.record_session_created()
+        logger.info(
+            "\U0001f680 SESSION started for issue #%s | id=%s | acu_cap=%s | %s",
+            event.number,
+            tracked.session_id or "?",
+            self._settings.max_acu_limit,
+            tracked.session_url or "(no url)",
+        )
         await self._safe_comment(
             tracked,
             f"Started a Devin session to remediate this issue (ACU cap "
@@ -169,6 +199,12 @@ class Orchestrator:
             attempt=attempt - 1,
             max_attempts=self._settings.max_retries,
         )
+        logger.info(
+            "\U0001f4ac FEEDBACK \u2192 session %s for issue #%s (attempt %s)",
+            tracked.session_id,
+            tracked.event.number,
+            attempt,
+        )
         try:
             await self._devin.send_message(tracked.session_id, message)
         except DevinAPIError as exc:
@@ -180,11 +216,21 @@ class Orchestrator:
         session_id = tracked.session_id
         deadline = time.monotonic() + self._settings.session_timeout_seconds
         last: dict[str, object] = {}
+        last_status: str | None = None
 
         while True:
             try:
                 session = await self._devin.get_session(session_id)
                 last = session
+                status = str(session.get("status") or "")
+                if status and status != last_status:
+                    logger.info(
+                        "\u23f3 SESSION %s issue #%s | status=%s",
+                        session_id,
+                        tracked.event.number,
+                        status,
+                    )
+                    last_status = status
             except DevinAPIError as exc:
                 logger.warning("get_session failed for %s: %s", session_id, exc)
                 if time.monotonic() >= deadline:
@@ -215,13 +261,32 @@ class Orchestrator:
         tracked.pr_opened_at = time.time()
         tracked.state = IssueState.PR_OPENED
         self._metrics.record_pr_opened(tracked.time_to_pr_seconds)
+        logger.info(
+            "\U0001f500 PR OPENED for issue #%s | %s | time-to-PR=%.0fs",
+            tracked.event.number,
+            pr_url,
+            tracked.time_to_pr_seconds or 0.0,
+        )
         await self._safe_comment(tracked, f"Devin opened a pull request: {pr_url}")
 
     async def _evaluate(self, tracked: TrackedIssue, result: SessionResult) -> Outcome:
         if result.pr_url:
+            logger.info(
+                "\U0001f50e VERIFYING issue #%s against acceptance criteria \u2014 %s",
+                tracked.event.number,
+                result.pr_url,
+            )
             verification = await self._verifier.verify(result.pr_url)
             self._metrics.record_verification(verification.passed)
             status = "passed" if verification.passed else "failed"
+            logger.info(
+                "%s VERIFICATION %s for issue #%s \u2014 %s%s",
+                "\u2705" if verification.passed else "\u274c",
+                status,
+                tracked.event.number,
+                verification.reason,
+                f" | CI={verification.ci_state}" if verification.ci_state else "",
+            )
             await self._safe_comment(
                 tracked,
                 f"Verification {status}: {verification.reason}"
@@ -248,6 +313,14 @@ class Orchestrator:
         tracked.completed_at = time.time()
         self._metrics.record_escalation()
         label = self._settings.needs_human_label
+        logger.warning(
+            "\U0001f6a8 ESCALATING issue #%s after %s attempt(s) "
+            "(last outcome: %s) \u2014 labelling %r",
+            tracked.event.number,
+            tracked.attempts,
+            outcome.value,
+            label,
+        )
         await self._safe_comment(
             tracked,
             f"Automated remediation failed after {tracked.attempts} attempts "
