@@ -48,6 +48,7 @@ class FakeDevin:
         self.created: list[str] = []
         self.create_kwargs: list[dict[str, Any]] = []
         self.messages: list[str] = []
+        self.terminated: list[str] = []
 
     async def create_session(
         self,
@@ -82,6 +83,12 @@ class FakeDevin:
     async def send_message(self, session_id: str, message: str) -> dict[str, Any]:
         self.messages.append(message)
         return {}
+
+    async def terminate_session(
+        self, session_id: str, archive: bool = False
+    ) -> dict[str, Any]:
+        self.terminated.append(session_id)
+        return {"session_id": session_id, "status": "exit"}
 
 
 class FakeGitHub:
@@ -160,11 +167,43 @@ async def test_happy_path_opens_pr_and_verifies() -> None:
     assert tracked.pr_url == PR_URL
     assert metrics.verifications_passed == 1
     assert metrics.prs_opened == 1
+    # The session is terminated once the issue is processed.
+    assert devin.terminated == ["devin-1"]
     # Comments cover session start, PR opened, and verification result.
     joined = "\n".join(github.comments)
     assert "Started a Devin session" in joined
     assert "opened a pull request" in joined
     assert "Verification passed" in joined
+
+
+@pytest.mark.asyncio
+async def test_waiting_for_user_session_with_pr_is_treated_as_done() -> None:
+    # Devin finished its work and is now idling on the user (no human will
+    # ever respond in this pipeline) — the loop must not hang until timeout.
+    devin = FakeDevin(
+        [
+            {
+                "session_id": "devin-1",
+                "status": "running",
+                "status_detail": "waiting_for_user",
+                "structured_output": {
+                    "acceptance_criteria_met": True,
+                    "pr_url": PR_URL,
+                    "summary": "Done.",
+                },
+                "acus_consumed": 2.0,
+            }
+        ]
+    )
+    github = FakeGitHub()
+    orch, metrics, _ = build(devin, github, make_settings())
+
+    tracked = await orch.handle_event(make_event())
+
+    assert tracked.state is IssueState.VERIFIED_PASSED
+    assert tracked.pr_url == PR_URL
+    assert metrics.verifications_passed == 1
+    assert devin.terminated == ["devin-1"]
 
 
 @pytest.mark.asyncio
