@@ -1,27 +1,32 @@
 """FastAPI application wiring the orchestrator together.
 
 Exposes:
-  * GET /healthz   - liveness probe
-  * GET /metrics   - JSON metrics (success rate, time-to-PR, ACU cost, retries)
-  * GET /dashboard - minimal HTML dashboard rendering the same metrics
-  * GET /issues    - current tracked-issue state (observability)
+  * GET /healthz     - liveness probe
+  * GET /metrics     - JSON metrics (success rate, time-to-PR, ACU cost, retries)
+  * GET /dashboard   - minimal HTML dashboard rendering the same metrics
+  * GET /issues      - current tracked-issue state (observability)
+  * GET /logs        - live HTML log viewer (SSE-backed)
+  * GET /logs/stream - Server-Sent Events stream of log lines
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from .clients.devin import DevinClient
 from .clients.github import GitHubClient
 from .config import Settings
 from .dashboard import render_dashboard
 from .ingestion.polling import PollingIngestionAdapter
+from .log_stream import LOG_BROKER, stream_logs
 from .logging_setup import banner, configure_logging
+from .logs_view import render_logs_page
 from .metrics import Metrics
 from .orchestrator import Orchestrator
 from .runner import PollerLoop
@@ -46,6 +51,7 @@ class AppState:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = Settings.from_env()
+    LOG_BROKER.attach_loop(asyncio.get_running_loop())
     for line in banner(settings.github_repo, settings.dry_run).splitlines():
         logger.info(line)
     metrics = Metrics()
@@ -175,3 +181,24 @@ async def dashboard() -> HTMLResponse:
         issues=state.store.all(),
     )
     return HTMLResponse(html)
+
+
+@app.get("/logs", response_class=HTMLResponse)
+async def logs() -> HTMLResponse:
+    return HTMLResponse(render_logs_page(_state(app).settings.github_repo))
+
+
+@app.get("/logs/stream")
+async def logs_stream(request: Request) -> StreamingResponse:
+    async def is_disconnected() -> bool:
+        return await request.is_disconnected()
+
+    return StreamingResponse(
+        stream_logs(LOG_BROKER, is_disconnected),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
