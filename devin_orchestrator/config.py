@@ -90,6 +90,7 @@ class Settings:
     # Operational
     dry_run: bool = False  # when true, never call the Devin API (testing only)
     process_existing_on_start: bool = False
+    demo_seed: bool = False  # pre-populate metrics with realistic sample data
 
     labels: tuple[str, ...] = field(default=())
 
@@ -131,6 +132,7 @@ class Settings:
             http_timeout_seconds=_get_float("HTTP_TIMEOUT_SECONDS", 30.0),
             dry_run=_get_bool("DRY_RUN", False),
             process_existing_on_start=_get_bool("PROCESS_EXISTING_ON_START", False),
+            demo_seed=_get_bool("DEMO_SEED", False),
         )
 
     def validate_for_live(self) -> None:
