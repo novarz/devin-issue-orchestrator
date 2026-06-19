@@ -23,6 +23,7 @@ from .clients.devin import DevinClient
 from .clients.github import GitHubClient
 from .config import Settings
 from .dashboard import render_dashboard
+from .demo_seed import seed as demo_seed
 from .ingestion.polling import PollingIngestionAdapter
 from .log_stream import LOG_BROKER, stream_logs
 from .logging_setup import banner, configure_logging
@@ -56,6 +57,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info(line)
     metrics = Metrics()
     store = IssueStore()
+
+    if settings.demo_seed:
+        count = demo_seed(settings.github_repo, metrics, store)
+        logger.info("DEMO_SEED: injected %d sample issues into metrics/store", count)
 
     github = GitHubClient(
         token=settings.github_token,
